@@ -1,0 +1,8 @@
+openai-whisper
+transformers
+torch
+langchain
+pyaudio
+speechrecognition
+fastapi
+uvicorn
