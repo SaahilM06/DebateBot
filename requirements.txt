@@ -6,3 +6,4 @@ pyaudio
 speechrecognition
 fastapi
 uvicorn
+chromadb

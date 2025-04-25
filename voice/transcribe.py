@@ -8,4 +8,3 @@ def transcribe_audio(file_path):
 if __name__ == "__main__":
     print(transcribe_audio("audio/A one minute TEDx Talk for the digital age  Woody Roseland  TEDxMileHigh.mp3"))
 
-
