@@ -7,3 +7,4 @@ speechrecognition
 fastapi
 uvicorn
 chromadb
+nltk
