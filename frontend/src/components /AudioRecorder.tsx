@@ -1,34 +1,110 @@
-import React, { useRef, useState } from "react";
-import { useReactMediaRecorder } from "react-media-recorder";
-
+import React, { useEffect, useRef, useState } from "react";
 
 const AudioRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const socketRef = useRef<WebSocket | null>(null);
+
+  const connectWebSocket = () => {
+    const socket = new WebSocket("ws://localhost:8766");
+    socketRef.current = socket;
+
+    socket.onopen = () => {
+      console.log("✅ WebSocket connected");
+      setIsConnected(true);
+      setIsConnecting(false);
+    };
+
+    socket.onmessage = (event) => {
+      setTranscript((prev) => prev + " " + event.data);
+    };
+
+    socket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+      setIsConnected(false);
+    };
+
+    socket.onclose = () => {
+      console.log("❌ WebSocket disconnected");
+      setIsConnected(false);
+    };
+  };
 
   const handleStart = async () => {
+    setIsConnecting(true); // Show loading message
+
     const res = await fetch("http://localhost:8000/start-transcription/", {
-      method: "POST"
+      method: "POST",
     });
     const json = await res.json();
-    console.log(json.status);
+    console.log("Server:", json.status);
+
+    // Once server starts, connect to WebSocket
+    connectWebSocket();
     setIsRecording(true);
   };
 
   const handleStop = async () => {
     const res = await fetch("http://localhost:8000/stop-transcription/", {
-      method: "POST"
+      method: "POST",
     });
     const json = await res.json();
-    console.log(json.status);
+    console.log("Server:", json.status);
+
     setIsRecording(false);
+    socketRef.current?.close();
   };
 
   return (
-    <div>
+    <div style={{ padding: "1rem" }}>
       <h2>🎙️ Debate Bot Live Transcription</h2>
-      <button onClick={isRecording ? handleStop : handleStart}>
-        {isRecording ? "Stop Recording" : "Start Recording"}
+
+      <button
+        onClick={isRecording ? handleStop : handleStart}
+        disabled={isConnecting}
+        style={{
+          padding: "0.6rem 1rem",
+          fontWeight: "bold",
+          backgroundColor: isRecording ? "#e74c3c" : "#2ecc71",
+          color: "white",
+          border: "none",
+          borderRadius: "5px",
+          cursor: "pointer",
+        }}
+      >
+        {isConnecting
+          ? "⏳ Connecting..."
+          : isRecording
+          ? "Stop Recording"
+          : "Start Recording"}
       </button>
+
+      <div style={{ marginTop: "1rem" }}>
+        <strong>Status:</strong>{" "}
+        {isConnecting
+          ? "Connecting to server..."
+          : isRecording && isConnected
+          ? "Recording (Live)"
+          : "recording"}
+      </div>
+
+      <div
+        style={{
+          marginTop: "1rem",
+          border: "1px solid #ccc",
+          padding: "1rem",
+          borderRadius: "5px",
+          backgroundColor: "#f9f9f9",
+          minHeight: "100px",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        <strong>Live Transcript:</strong>
+        <br />
+        {transcript || "Waiting for speech..."}
+      </div>
     </div>
   );
 };

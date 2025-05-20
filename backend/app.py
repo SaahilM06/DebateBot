@@ -6,6 +6,8 @@ from typing import List
 from pathlib import Path
 from transcribe import transcribe_audio
 import subprocess
+import time
+import socket
 
 process = None
 
@@ -35,6 +37,12 @@ def start_transcription():
     global process
     if process is None:
         process = subprocess.Popen(["python", "/Users/saahi/Desktop/debate-bot/backend/record_and_transcribe.py"])
+        while True:
+            try:
+                with socket.create_connection(("localhost", 8766), timeout=1):
+                    break
+            except OSError:
+                time.sleep(0.5)
         return {"status": "started"}
     else:
         return {"status": "already running"}
@@ -44,6 +52,8 @@ def stop_transcription():
     global process
     if process is not None:
         process.terminate()
+       
+
         process = None
         return {"status": "stopped"}
     else:

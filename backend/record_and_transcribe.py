@@ -24,6 +24,7 @@ TERMINAL_WAKE_UP_PHRASE = "Hey Terminal"
 
 async def run_audio_transcription():
     parser = argparse.ArgumentParser()
+    #look here to see what model to select, small for speed medium for accuracy change default accordingly, small works better after testing
     parser.add_argument("--model", default="small", choices=["tiny", "base", "small", "medium", "large"])
     parser.add_argument("--non_english", action='store_true')
     parser.add_argument("--energy_threshold", default=1000, type=int)
@@ -90,7 +91,7 @@ async def run_audio_transcription():
 
                 result = audio_model.transcribe(temp_file, fp16=torch.cuda.is_available())
                 text = result['text'].strip()
-
+                last_write_time = datetime.utcnow()
                 if text:
                     if phrase_complete:
                         transcription.append(text)
