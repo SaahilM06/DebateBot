@@ -8,7 +8,7 @@ const AudioRecorder = () => {
   const socketRef = useRef<WebSocket | null>(null);
 
   const connectWebSocket = () => {
-    const socket = new WebSocket("ws://localhost:8766");
+    const socket = new WebSocket("ws://localhost:8767");
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -82,13 +82,14 @@ const AudioRecorder = () => {
       </button>
 
       <div style={{ marginTop: "1rem" }}>
-        <strong>Status:</strong>{" "}
-        {isConnecting
-          ? "Connecting to server..."
-          : isRecording && isConnected
-          ? "Recording (Live)"
-          : "recording"}
-      </div>
+  <strong>Status:</strong>{" "}
+  {isConnecting
+    ? "Connecting to server..."
+    : isRecording
+    ? "Recording..."
+    : "Idle"}
+</div>
+
 
       <div
         style={{

@@ -9,7 +9,7 @@ import websockets
 import whisper
 import torch
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from queue import Queue
 from tempfile import NamedTemporaryFile
 from time import sleep
@@ -71,7 +71,7 @@ async def run_audio_transcription():
     transcription = ['']
     while True:
         try:
-            now = datetime.utcnow()
+            now = datetime.now(UTC)
             if not data_queue.empty():
                 phrase_complete = False
                 if phrase_time and now - phrase_time > timedelta(seconds=phrase_timeout):
@@ -125,7 +125,7 @@ async def websocket_handler(websocket, path):
         pass
 
 async def run_websockets_server():
-    async with websockets.serve(websocket_handler, 'localhost', 8766):
+    async with websockets.serve(websocket_handler, 'localhost', 8767):
         print("WebSocket server running at ws://localhost:8766")
         await asyncio.Future()
 

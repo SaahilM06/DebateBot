@@ -39,7 +39,7 @@ def start_transcription():
         process = subprocess.Popen(["python", "/Users/saahi/Desktop/debate-bot/backend/record_and_transcribe.py"])
         while True:
             try:
-                with socket.create_connection(("localhost", 8766), timeout=1):
+                with socket.create_connection(("localhost", 8767), timeout=1):
                     break
             except OSError:
                 time.sleep(0.5)
