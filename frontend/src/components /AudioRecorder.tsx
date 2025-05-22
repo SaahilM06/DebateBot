@@ -52,10 +52,25 @@ const AudioRecorder = () => {
     });
     const json = await res.json();
     console.log("Server:", json.status);
-
+  
     setIsRecording(false);
     socketRef.current?.close();
+  
+    // ⬇️ GPT is called AFTER recording stops
+    await fetch("http://localhost:8000/final-speech/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ side: "Affirmative" }), // replace with dynamic user choice if needed
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("🧠 GPT Response:", data.speech);
+      })
+      .catch((err) => {
+        console.error("❌ GPT generation failed:", err);
+      });
   };
+  
 
   return (
     <div style={{ padding: "1rem" }}>

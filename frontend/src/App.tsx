@@ -3,10 +3,12 @@ import AudioRecorder from './components /AudioRecorder';
 import './App.css';
 import Dropdown from "./components /Dropdown";
 import { useState } from 'react';
+import VoiceActivityDot from './components /VoiceActivityDot';
 
 
 function App() {
   const [file, setFile] = useState<File | null>(null); 
+  const [billFile, setBillFile] = useState<File | null>(null);
 
   const handleSideSelect = (side: string) => {
     console.log("User chose:", side);
@@ -19,6 +21,14 @@ function App() {
       setFile(selectedFile);
     }
   };
+
+  const handleBillFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile) {
+      setBillFile(selectedFile);
+    }
+  };
+
 
   const handleSubmit = async () => {
     if(!file) {
@@ -47,6 +57,29 @@ function App() {
       console.error("error ", error);
   }
   }
+
+
+  const handleBillSubmit = async () => {
+    if (!billFile) {
+      alert("Upload your bill first.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file_upload", billFile);
+    try {
+      const response = await fetch("http://localhost:8000/bill-choice/", {
+        method: "POST",
+        body: formData,
+      });
+
+      const result = await response.json();
+      alert(result.message);
+      setBillFile(null);
+    } catch (error) {
+      console.error("Bill submit error", error);
+    }
+  };
   
 
   const handleVectorize = async () => {
@@ -87,10 +120,19 @@ function App() {
   />
 
 
-
+   <p>Submit your reference speech here</p>
   <input type="file" onChange={handleFileChange} />
 
   <button onClick={handleSubmit} style={{ marginTop: "1rem" }}>
+        Submit Choice
+    </button>
+    
+
+
+    <p>Submit your bill  here</p>
+  <input type="file" onChange={handleBillFileChange} />
+
+  <button onClick={handleBillSubmit} style={{ marginTop: "1rem" }}>
         Submit Choice
     </button>
   
@@ -102,6 +144,7 @@ function App() {
 
       <AudioRecorder />
 
+      <VoiceActivityDot />
 
     </div>
   );
