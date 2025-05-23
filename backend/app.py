@@ -45,7 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.post("/start-transcription/")
+@app.post('/start-transcription/')
 def start_transcription():
     global process
     if process is None:

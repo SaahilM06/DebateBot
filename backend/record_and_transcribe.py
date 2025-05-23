@@ -125,7 +125,7 @@ async def websocket_handler(websocket, path):
         pass
 
 async def run_websockets_server():
-    async with websockets.serve(websocket_handler, 'localhost', 8767):
+    async with websockets.serve(websocket_handler, 'localhost', 8767, ping_timeout=None):
         print("WebSocket server running at ws://localhost:8766")
         await asyncio.Future()
 
