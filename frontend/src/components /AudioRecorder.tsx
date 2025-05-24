@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 
 const AudioRecorder = () => {
   const [isRecording, setIsRecording] = useState(false);
@@ -8,7 +8,7 @@ const AudioRecorder = () => {
   const socketRef = useRef<WebSocket | null>(null);
 
   const connectWebSocket = () => {
-    const socket = new WebSocket("ws://localhost:8767");
+    const socket = new WebSocket("ws://localhost:8766");
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -33,7 +33,7 @@ const AudioRecorder = () => {
   };
 
   const handleStart = async () => {
-    setIsConnecting(true); // Show loading message
+    setIsConnecting(true);
 
     const res = await fetch("http://localhost:8000/start-transcription/", {
       method: "POST",
@@ -41,7 +41,6 @@ const AudioRecorder = () => {
     const json = await res.json();
     console.log("Server:", json.status);
 
-    // Once server starts, connect to WebSocket
     connectWebSocket();
     setIsRecording(true);
   };
@@ -52,15 +51,14 @@ const AudioRecorder = () => {
     });
     const json = await res.json();
     console.log("Server:", json.status);
-  
+
     setIsRecording(false);
     socketRef.current?.close();
-  
-    // ⬇️ GPT is called AFTER recording stops
+
     await fetch("http://localhost:8000/final-speech/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ side: "Affirmative" }), // replace with dynamic user choice if needed
+      body: JSON.stringify({ side: "Affirmative" }),
     })
       .then((res) => res.json())
       .then((data) => {
@@ -70,7 +68,6 @@ const AudioRecorder = () => {
         console.error("❌ GPT generation failed:", err);
       });
   };
-  
 
   return (
     <div style={{ padding: "1rem" }}>
@@ -97,14 +94,13 @@ const AudioRecorder = () => {
       </button>
 
       <div style={{ marginTop: "1rem" }}>
-  <strong>Status:</strong>{" "}
-  {isConnecting
-    ? "Connecting to server..."
-    : isRecording
-    ? "Recording..."
-    : "Idle"}
-</div>
-
+        <strong>Status:</strong>{" "}
+        {isConnecting
+          ? "Connecting to server..."
+          : isRecording
+          ? "Recording..."
+          : "Idle"}
+      </div>
 
       <div
         style={{

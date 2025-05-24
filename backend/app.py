@@ -4,11 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel 
 from typing import List 
 from pathlib import Path
-from transcribe import transcribe_audio
 import subprocess
 import time
 import socket
-
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -23,6 +21,17 @@ import requests
 
 process = None
 
+app = FastAPI()
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 UPLOAD_DIR = Path("uploads/audio-uploads")
 UPLOAD_DIR1 = Path("uploads/submission_uploads")
 UPLOAD_DIR2 = Path("uploads/pdf-uploads")
@@ -30,35 +39,23 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR3 = BASE_DIR / "uploads" / "bill_uploads"
 UPLOAD_DIR3.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI()
-
-origins = ["http://localhost:3000"]
-
 class Choice(BaseModel): 
     choice: str
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins, 
-    allow_credentials=True, 
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.post('/start-transcription/')
+# ✅ Transcription Start/Stop (WebSocket-based)
+@app.post("/start-transcription/")
 def start_transcription():
     global process
     if process is None:
         process = subprocess.Popen(["python", "/Users/saahi/Desktop/debate-bot/backend/record_and_transcribe.py"])
         while True:
             try:
-                with socket.create_connection(("localhost", 8767), timeout=1):
+                with socket.create_connection(("localhost", 8766), timeout=1):
                     break
             except OSError:
                 time.sleep(0.5)
         return {"status": "started"}
-    else:
-        return {"status": "already running"}
+    return {"status": "already running"}
 
 @app.post("/stop-transcription/")
 def stop_transcription():
@@ -67,52 +64,42 @@ def stop_transcription():
         process.terminate()
         process = None
         return {"status": "stopped"}
-    else:
-        return {"status": "not running"}
+    return {"status": "not running"}
 
+# ✅ File Uploads
 @app.post("/uploadfile/")
 async def create_upload_file(file_upload: UploadFile):
     data = await file_upload.read()
     save_to = UPLOAD_DIR / file_upload.filename
     with open(save_to, 'wb') as f:
         f.write(data)
-    transcript = transcribe_audio(str(save_to))
-    with open("output_transcribe.txt", 'w') as f:
-        f.write(transcript + "\n")
-    return {
-        "filenames": file_upload.filename,
-        "transcript": transcript
-    }
+    return {"filenames": file_upload.filename}
 
 @app.post("/submit-choice/")
 async def submit_choice(data: Choice):
-    UPLOAD_DIR1.mkdir(parents=True, exist_ok=True) 
+    UPLOAD_DIR1.mkdir(parents=True, exist_ok=True)
     save_to = UPLOAD_DIR1 / "submission.txt"
     with open(save_to, 'w') as f:
         f.write(data.choice)
     return {"message": f"Choice '{data.choice}' submitted successfully."}
 
 @app.post("/file-choice/")
-async def create_upload_file(file_upload: UploadFile):
+async def create_upload_file_2(file_upload: UploadFile):
     data = await file_upload.read()
     save_to = UPLOAD_DIR2 / file_upload.filename
     with open(save_to, 'wb') as f:
         f.write(data)
-    return {
-        "filenames": file_upload.filename,
-    }
+    return {"filenames": file_upload.filename}
 
 @app.post("/bill-choice/")
 async def create_bill_upload(file_upload: UploadFile = File(...)):
     data = await file_upload.read()
     for existing in UPLOAD_DIR3.iterdir():
-        existing.unlink() 
+        existing.unlink()
     save_to = UPLOAD_DIR3 / file_upload.filename
     with open(save_to, 'wb') as f:
         f.write(data)
-    return {
-        "message": f"Successfully uploaded: {file_upload.filename}"
-    }
+    return {"message": f"Successfully uploaded: {file_upload.filename}"}
 
 @app.post("/run-vectorize/")
 def run_vectorize():
@@ -122,17 +109,15 @@ def run_vectorize():
             capture_output=True,
             text=True
         )
-        print("STDOUT:\n", result.stdout)
-        print("STDERR:\n", result.stderr)
         if result.returncode != 0:
             raise Exception(result.stderr)
         return {"message": "Vectorization complete", "output": result.stdout}
     except Exception as e:
         return {"error": str(e)}
 
+# ✅ Transcript + GPT Rebuttal Logic
 load_dotenv()
-
-transcript_path = "output_transcript.txt"
+transcript_path = "output_transcribe.txt"
 transcript_buffer = ""
 
 def extract_text_from_file(filepath: str) -> str:
@@ -145,36 +130,22 @@ def extract_text_from_file(filepath: str) -> str:
             image = Image.open(filepath).convert("L")
             image = ImageOps.autocontrast(image)
             return pytesseract.image_to_string(image)
-        else:
-            print("Unsupported file")
     except Exception as e:
         print("Extract error:", e)
     return ""
 
 def clean_text(text: str, max_words: int = 50) -> str:
     lines = text.splitlines()
-    cleaned = []
-    for line in lines:
-        line = line.strip()
-        if len(line) > 5 and any(c.isalpha() for c in line):
-            cleaned.append(line)
-    joined = " ".join(cleaned)
-    words = joined.split()
-    return " ".join(words[:max_words])
+    cleaned = [line.strip() for line in lines if len(line.strip()) > 5 and any(c.isalpha() for c in line)]
+    return " ".join(" ".join(cleaned).split()[:max_words])
 
 def serper_search(query: str, api_key: str):
-    headers = {
-        "X-API-KEY": api_key,
-        "Content-Type": "application/json"
-    }
-    payload = {"q": query}
-    res = requests.post("https://google.serper.dev/search", headers=headers, json=payload)
+    headers = {"X-API-KEY": api_key, "Content-Type": "application/json"}
+    res = requests.post("https://google.serper.dev/search", headers=headers, json={"q": query})
     if res.status_code != 200:
         print("Serper error:", res.text)
         return []
-    data = res.json()
-    results = data.get("organic", [])
-    return [r["link"] for r in results]
+    return [r["link"] for r in res.json().get("organic", [])]
 
 def live_transcript_reader():
     global transcript_buffer
@@ -193,7 +164,6 @@ def live_transcript_reader():
 @app.on_event("startup")
 def start_background_reader():
     Thread(target=live_transcript_reader, daemon=True).start()
-    print("transcript reading started")
 
 @app.get("/live-read/")
 def live_read():
@@ -204,14 +174,13 @@ def final_speech(data: dict = Body(...)):
     global transcript_buffer
     user_side = data["side"].upper()
     base_dir = os.path.dirname(__file__)
-    submission_file = os.path.abspath(os.path.join(base_dir, "../uploads/submission_uploads/submission.txt"))
+    submission_file = os.path.join(base_dir, "../uploads/submission_uploads/submission.txt")
     if os.path.exists(submission_file):
         with open(submission_file, "r") as f:
             user_side = f.read().strip().upper()
 
     bill_folder = os.path.join(base_dir, "uploads", "bill_uploads")
     bill_files = [f for f in os.listdir(bill_folder) if f.lower().endswith((".pdf", ".jpeg", ".jpg", ".png"))]
-
     if not bill_files:
         return {"error": "No bill file found in uploads/bill_uploads."}
 
@@ -235,33 +204,24 @@ def final_speech(data: dict = Body(...)):
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     system_prompt = (
-    f"You are a top-tier TFA Congressional debater tasked with arguing the {gpt_side} side. "
-    "Your job is to directly clash with the opponent's arguments, quoting or paraphrasing their points before refuting them. "
-    "You must use Contention, Warrant, and Impact structure with rich rhetorical language and specific references to the opponent's claims. "
-    "Each rebuttal must name the argument it is responding to and explain why your side outweighs it—either through magnitude, timeframe, or probability. "
-    "The tone should be confident, formal, and parliamentary, like an elite debater in a final round. If you are speaking second, focus especially on targeted rebuttal and impact weighing."
-)
-
+        f"You are a top-tier TFA Congressional debater tasked with arguing the {gpt_side} side. "
+        "Clash with the opponent's arguments using Contention, Warrant, and Impact. Be confident, formal, and parliamentary. "
+    )
 
     user_prompt = (
-        f"Here is the full bill text you are debating:\n\n{bill_text_raw.strip()}\n\n"
-        f"And here is the full transcript of the opponent's speech:\n\n{transcript_buffer.strip()}\n\n"
-        f"Here is relevant research from the web:\n\n{research_context}\n\n"
-        "Directly rebuttal the opponent's speech in your response. Make sure to provide a 3-minute speech (800 words)."
-        "\n\nMake sure your speech includes at least two direct quotations or paraphrases of the opponent's claims, and explain why they are flawed or incomplete. Use phrases like 'The affirmative claims...', 'However, this ignores...', 'While that may be true in theory...'. Your goal is not to summarize, but to **clash and outweigh**."
+        f"Bill:\n{bill_text_raw.strip()}\n\n"
+        f"Opponent Speech:\n{transcript_buffer.strip()}\n\n"
+        f"Research:\n{research_context}\n\n"
+        "Directly rebut at least two key points. Provide an 800-word 3-minute speech. Focus on clash and weighing."
     )
 
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
+        messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
         stream=True
     )
 
     full_reply = StringIO()
-
     def stream_and_save():
         for chunk in response:
             content = chunk.choices[0].delta.content or ""
@@ -271,8 +231,6 @@ def final_speech(data: dict = Body(...)):
     streamed_output = "".join(stream_and_save())
     with open("gpt_response.txt", "w") as f:
         f.write(streamed_output)
-    print("GPT Output:\n", streamed_output)
-
     return {"speech": streamed_output}
 
 if __name__ == "__main__":
