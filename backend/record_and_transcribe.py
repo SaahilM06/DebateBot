@@ -104,7 +104,7 @@ async def run_audio_transcription():
                     # ✅ Save to transcript file
                     with open("output_transcribe.txt", "a") as f:
                         f.write(line + "\n")
-
+                        
                 sleep(0.25)
                 await asyncio.sleep(1)
 

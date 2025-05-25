@@ -19,6 +19,26 @@ import pytesseract
 from PIL import Image, ImageOps
 import requests
 
+from fastapi import WebSocket
+import asyncio
+
+from pymongo import MongoClient
+from bson.objectid import ObjectId
+import os
+from dotenv import load_dotenv
+
+import uuid
+from fastapi import HTTPException
+
+from fastapi.responses import JSONResponse
+
+from bson import ObjectId
+
+
+
+
+
+
 process = None
 
 app = FastAPI()
@@ -39,8 +59,88 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR3 = BASE_DIR / "uploads" / "bill_uploads"
 UPLOAD_DIR3.mkdir(parents=True, exist_ok=True)
 
+
+load_dotenv()
+client = MongoClient(os.getenv("MONGO_URI"))
+db = client["debatebot"]
+conversations = db["conversations"]
+
+@app.post("/new-conversation/")
+def new_conversation():
+    count = conversations.count_documents({})
+    convo = {
+        "_id": str(uuid.uuid4()),
+        "title": f"Convo {count + 1}",
+        "transcript": "",
+        "response": ""
+    }
+    conversations.insert_one(convo)
+    return {"conversation_id": convo["_id"], "title": convo["title"]}
+
+
+@app.post("/save-transcript/{convo_id}")
+def save_transcript(convo_id: str, data: dict = Body(...)):
+    conversations.update_one({"_id": convo_id}, {"$set": {"transcript": data["transcript"]}})
+    return {"status": "transcript updated"}
+
+@app.post("/save-response/{convo_id}")
+def save_response(convo_id: str, data: dict = Body(...)):
+    conversations.update_one({"_id": convo_id}, {"$set": {"response": data["response"]}})
+    return {"status": "response saved"}
+
+
+@app.get("/conversations/")
+def get_all_conversations():
+    convos = conversations.find({}, {"_id": 1, "title": 1})
+    return {"conversations": [{"id": str(c["_id"]), "title": c.get("title", "Untitled") } for c in convos]}
+
+
+@app.get("/conversation/{convo_id}")
+def get_conversation(convo_id: str):
+    convo = conversations.find_one({"_id": convo_id})
+    if not convo:
+        return {"error": "Conversation not found"}
+    return {
+        "transcript": convo.get("transcript", ""),
+        "response": convo.get("response", ""),
+        "hasStarted": convo.get("hasStarted", False)
+    }
+
+
+@app.delete("/conversation/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    try:
+        result = conversations.delete_one({"_id": conversation_id})
+        if result.deleted_count == 0:
+            return JSONResponse(status_code=404, content={"error": "Conversation not found"})
+        return {"message": "Conversation deleted"}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+
+#mongodb logic
+
 class Choice(BaseModel): 
     choice: str
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("✅ WebSocket accepted")
+
+    try:
+        while True:
+            try:
+                data = await asyncio.wait_for(run_audio_transcription_queue.get(), timeout=2)
+                await websocket.send_text(data)
+            except asyncio.TimeoutError:
+                await websocket.send_text("🔁 Still waiting...")
+    except Exception as e:
+        print("❌ WebSocket error:", e)
+
+    
 
 # ✅ Transcription Start/Stop (WebSocket-based)
 @app.post("/start-transcription/")
@@ -101,8 +201,8 @@ async def create_bill_upload(file_upload: UploadFile = File(...)):
         f.write(data)
     return {"message": f"Successfully uploaded: {file_upload.filename}"}
 
-@app.post("/run-vectorize/")
-def run_vectorize():
+@app.post("/run-vectorize/{convo_id}")
+def run_vectorize(convo_id: str):
     try:
         result = subprocess.run(
             ["python", "/Users/saahi/Desktop/debate-bot/backend/vectorize.py"],
@@ -111,6 +211,10 @@ def run_vectorize():
         )
         if result.returncode != 0:
             raise Exception(result.stderr)
+
+        # Save state that it's been processed
+        conversations.update_one({"_id": convo_id}, {"$set": {"hasStarted": True}})
+        
         return {"message": "Vectorization complete", "output": result.stdout}
     except Exception as e:
         return {"error": str(e)}
@@ -192,6 +296,9 @@ def final_speech(data: dict = Body(...)):
     search_input = clean_text(bill_text_raw)
     serper_api_key = os.getenv("SERPER_API_KEY")
     urls = serper_search(search_input, serper_api_key)
+    print("🔗 URLs used for research:")
+    for url in urls:
+        print("   -", url)
     scraped_articles = []
     for url in urls[:2]:
         try:
