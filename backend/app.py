@@ -33,7 +33,22 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from bson import ObjectId
+from fastapi import BackgroundTasks
 
+from pathlib import Path
+
+
+
+
+
+import asyncio
+import edge_tts
+from pydub import AudioSegment
+from pydub.playback import play
+import io
+
+from fastapi.websockets import WebSocketDisconnect
+import simpleaudio as sa
 
 
 
@@ -59,11 +74,15 @@ BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR3 = BASE_DIR / "uploads" / "bill_uploads"
 UPLOAD_DIR3.mkdir(parents=True, exist_ok=True)
 
-
+#mongo db logic-------------------------
 load_dotenv()
 client = MongoClient(os.getenv("MONGO_URI"))
 db = client["debatebot"]
 conversations = db["conversations"]
+
+
+def reload_backend():
+    Path(__file__).touch()
 
 @app.post("/new-conversation/")
 def new_conversation():
@@ -100,8 +119,13 @@ def get_conversation(convo_id: str):
     convo = conversations.find_one({"_id": convo_id})
     if not convo:
         return {"error": "Conversation not found"}
+    
+    transcript = convo.get("transcript", "")
+    if not transcript:
+        transcript = transcript_buffer  # fallback
+
     return {
-        "transcript": convo.get("transcript", ""),
+        "transcript": transcript,
         "response": convo.get("response", ""),
         "hasStarted": convo.get("hasStarted", False)
     }
@@ -116,13 +140,98 @@ async def delete_conversation(conversation_id: str):
         return {"message": "Conversation deleted"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+#mongo db logic-------------------------
 
 
 
-#mongodb logic
+#tts logic -----------------------------
+tts_process = None
+
+tts_task = None
+play_obj = None  # 👈 ADD THIS
+
+@app.post("/start-tts/")
+async def start_tts():
+    global tts_task, play_obj
+
+    with open("gpt_response.txt", "r") as f:
+        text = f.read().strip()
+
+    communicate = edge_tts.Communicate(text, voice="en-US-GuyNeural", rate="+90%")
+
+    async def run_tts():
+        global play_obj
+        audio_stream = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_stream += chunk["data"]
+
+        audio = AudioSegment.from_file(io.BytesIO(audio_stream), format="mp3")
+        
+        # play and store reference so it can be stopped
+        play_obj = sa.play_buffer(
+            audio.raw_data,
+            num_channels=audio.channels,
+            bytes_per_sample=audio.sample_width,
+            sample_rate=audio.frame_rate,
+        )
+
+        # block in background thread so it doesn't block FastAPI
+        await asyncio.get_event_loop().run_in_executor(None, play_obj.wait_done)
+
+    tts_task = asyncio.create_task(run_tts())
+    
+
+    return {"status": "started"}
+
+@app.post("/stop-tts/")
+async def stop_tts():
+    global tts_task, play_obj
+
+    if play_obj:
+        play_obj.stop()
+        play_obj = None  # Optional: Clear it out
+
+    if tts_task and not tts_task.done():
+        tts_task.cancel()
+        tts_task = None
+    
+    reload_backend()
+
+    return {"status": "stopped"}
+
+
+@app.post("/speak-instruction/")
+async def speak_instruction(data: dict = Body(...)):
+    text = data.get("text", "")
+    if not text:
+        return {"error": "No text provided"}
+
+    communicate = edge_tts.Communicate(text, voice="en-US-GuyNeural", rate="+15%")
+    audio_stream = b""
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_stream += chunk["data"]
+
+    audio = AudioSegment.from_file(io.BytesIO(audio_stream), format="mp3")
+    play_obj = sa.play_buffer(
+        audio.raw_data,
+        num_channels=audio.channels,
+        bytes_per_sample=audio.sample_width,
+        sample_rate=audio.frame_rate,
+    )
+    play_obj.wait_done()
+    
+    return {"status": "played"}
+
+
+#tts logic -----------------------------
+
+
 
 class Choice(BaseModel): 
     choice: str
+
 
 
 @app.websocket("/ws")
@@ -137,12 +246,18 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(data)
             except asyncio.TimeoutError:
                 await websocket.send_text("🔁 Still waiting...")
+
+                # 🔒 Optional safety check:
+                if process is None:  # transcription process not running
+                    print("🛑 Transcription ended, closing WebSocket.")
+                    await websocket.close()
+                    break
+    except WebSocketDisconnect:
+        print("❌ Client disconnected WebSocket.")
     except Exception as e:
         print("❌ WebSocket error:", e)
-
     
 
-# ✅ Transcription Start/Stop (WebSocket-based)
 @app.post("/start-transcription/")
 def start_transcription():
     global process
@@ -216,6 +331,14 @@ def run_vectorize(convo_id: str):
         conversations.update_one({"_id": convo_id}, {"$set": {"hasStarted": True}})
         
         return {"message": "Vectorization complete", "output": result.stdout}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.post("/reload-backend/")
+def reload_backend_route():
+    try:
+        reload_backend()  # wherever this is defined
+        return {"message": "Backend reloaded successfully"}
     except Exception as e:
         return {"error": str(e)}
 
@@ -314,12 +437,16 @@ def final_speech(data: dict = Body(...)):
         f"You are a top-tier TFA Congressional debater tasked with arguing the {gpt_side} side. "
         "Clash with the opponent's arguments using Contention, Warrant, and Impact. Be confident, formal, and parliamentary. "
     )
-
+    model_speech = "In 1961, a civil rights group known as CORE founded the Freedom Riders. In one of the era's final acts of protests, they traveled the South by bus in order to defy segregation. Upon arriving in Jackson, Mississippi, they encountered brutality, indignation, and imprisonment. In an attempt to hold their officers accountable, they saw judicial relief through the KKK act. And in response, this government birthed qualified immunity. That takes us to today. As America, a chance, say their name, seeking the same relief that the Freedom Riders fought for, all we've met them with is silence. Principally, pass this legislation to reform police training in America. The National Conference of State Legislators writes on August 22, 2022, that only 11 states require police to learn the various forms of de-escalation training, meaning in the other 39 states, there are no accountability methods to ensure that the right techniques are taught. Yet in half of the 8,514 federal police shootings, the subject of a rest never possessed a fire arm. Unarmed in half of shootings. We need accountability, and today's legislation delivers that. Senator Stevenson, Senator Wilkins, you tell us it does nothing. This removes illegal protection, meaning there's more accountability. As the Institute of Justice found on January 23, 2022, the removal of qualified immunity would raise liability to the point where departments would be forced to embrace de-escalation techniques. That's why the Washington Post wrote in June 23, 2021, that when the NYPD lost their qualified immunity, it only took them two months to establish de-escalation techniques. The only question left in this debate is does this training work? Yes, it does. First, it holds officers and protects them. As the American Psychological Association writes on October 1, 2020, the training I mentioned earlier in Las Vegas reduced officer injuries by 11%, as the DOJ found in September 6, 2022, and Louisville, it reduced officer injuries by 36%. The best of us choose to serve and protect us. Today, let the best of us serve and protect them. Secondly, it protects the community. That same APA report found that the de-escalation training led to safer community interactions. In Las Vegas, the use of force dropped by 23% in Louisville, by 26%, and in Seattle, by 40%, behind every statistic is a story. Don't let anyone's be cut short. Say their name by passing. We can finally require every department and this government to acknowledge them with action or go with Senator Stevens' plan, strike down this legislation and give them the same response that we've issued for generations. That silence."
     user_prompt = (
         f"Bill:\n{bill_text_raw.strip()}\n\n"
         f"Opponent Speech:\n{transcript_buffer.strip()}\n\n"
+        "Below is an example of a high-quality Congressional debate speech. It uses strong rhetoric, historical framing, impact weighing, and structured clash (Contention, Warrant, Impact)."
+        " Model your style, tone, and argumentative structure after it:\n\n"
+        f"{model_speech}\n\n"
         f"Research:\n{research_context}\n\n"
         "Directly rebut at least two key points. Provide an 800-word 3-minute speech. Focus on clash and weighing."
+        "After you make a general argument such as, The notion that these proxy groups are so weakened that they pose no threat is dangerously optimistic and naïve, you have to explain WHY and HOW"
     )
 
     response = client.chat.completions.create(

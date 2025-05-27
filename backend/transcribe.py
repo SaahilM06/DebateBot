@@ -6,5 +6,5 @@ def transcribe_audio(file_path):
     return result["text"]
 
 if __name__ == "__main__":
-    print(transcribe_audio("audio/A one minute TEDx Talk for the digital age  Woody Roseland  TEDxMileHigh.mp3"))
+    print(transcribe_audio("/Users/saahi/Desktop/debate-bot/audio/NSDA Championship Winning Speech.mp3"))
 
