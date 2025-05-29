@@ -1,5 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
 import SpeechBubble from "./components /SpeechBubble";
+import { TextBox } from '@syncfusion/ej2-inputs';
+import './license';
+
 
 
 const Dropdown = ({ options, onSelect, label }: { options: string[]; onSelect: (value: string) => void; label: string }) => {
@@ -91,6 +94,17 @@ const [messages, setMessages] = useState<Message[]>([]);
 
  const socketRef = useRef<WebSocket | null>(null);
 
+ const [isCrossExActive, setIsCrossExActive] = useState(false);
+ const [crossTranscript, setCrossTranscript] = useState("");
+ const [crossExHistory, setCrossExHistory] = useState<{ question: string; answer: string }[]>([]);
+ const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+ const crossSocketRef = useRef<WebSocket | null>(null);
+
+ const [showInstructionModal, setShowInstructionModal] = useState(false);
+const [customInstruction, setCustomInstruction] = useState("");
+const [showInitialInstructions, setShowInitialInstructions] = useState(true);
+
+
 
  useEffect(() => {
  const fetchConversations = async () => {
@@ -101,6 +115,72 @@ const [messages, setMessages] = useState<Message[]>([]);
     fetchConversations();
  }, []);
 
+
+ const sendCrossQuestion = async (questionText: string) => {
+  const res = await fetch("http://localhost:8000/cross-response/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      question: questionText,
+      history: crossExHistory,
+    }),
+  });
+
+  const data = await res.json();
+  const answer = data.answer;
+
+  setCrossExHistory(prev => [...prev, { question: questionText, answer }]);
+  setMessages(prev => [...prev, { text: questionText, isUser: true }, { text: answer, isUser: false }]);
+
+  await fetch("http://localhost:8000/speak-instruction/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text: answer }),
+  });
+};
+
+const handleStartCrossEx = async () => {
+  try {
+    const start = await fetch("http://localhost:8000/start-crossref/", { method: "POST" });
+    const startData = await start.json();
+    console.log("▶️ CrossRef:", startData.status);
+
+    const poll = async () => {
+      const res = await fetch("http://localhost:8000/get-crossref-result/");
+      const data = await res.json();
+
+      if (data.ready) {
+        console.log("✅ CrossRef data ready:", data);
+        setMessages((prev) => [
+          ...prev,
+          { text: data.question, isUser: true },
+          { text: data.answer, isUser: false }
+        ]);
+      } else {
+        setTimeout(poll, 1000); // Try again in 1 second
+      }
+    };
+
+    poll();
+  } catch (err) {
+    console.error("❌ CrossRef error:", err);
+  }
+};
+
+
+
+
+const handleStopCrossEx = async () => {
+  try {
+    const res = await fetch("http://localhost:8000/stop-crossref/", {
+      method: "POST",
+    });
+    const data = await res.json();
+    console.log("⏹ CrossRef stopped:", data.status);
+  } catch (err) {
+    console.error("Failed to stop crossref:", err);
+  }
+};
 
   const loadConversation = async (id: string) => {
    setConversationId(null);
@@ -215,7 +295,7 @@ const [messages, setMessages] = useState<Message[]>([]);
       });
       */
       
-
+      
     } else {
       alert("Error: " + result.error);
     }
@@ -236,6 +316,11 @@ const [messages, setMessages] = useState<Message[]>([]);
      setStatus("Recording");
      setIsRecording(true);
    }, 5000);
+
+   const inputBox = new TextBox({
+    placeholder: 'Enter your response here...',
+  });
+  inputBox.appendTo('#textbox-target');
  };
 
 
@@ -359,6 +444,14 @@ const [messages, setMessages] = useState<Message[]>([]);
            <span className="material-icons mr-3">add_circle_outline</span>
            New Debate
          </button>
+
+         <button
+  onClick={() => setShowInitialInstructions(true)}
+  className="flex items-center w-full text-left py-2.5 px-4 rounded-md hover:bg-gray-700 mb-2"
+>
+  <span className="material-icons mr-3">info</span>
+  Instructions
+</button>
          <h3 className="text-xs text-gray-400 uppercase font-semibold mb-3 px-4">Tools</h3>
          <nav className="space-y-1 mb-6">
            <a className="flex items-center py-2 px-4 rounded-md hover:bg-gray-700 text-sm" href="#">
@@ -424,7 +517,7 @@ const [messages, setMessages] = useState<Message[]>([]);
   </div>
 ))}
 </div>
-*/
+
 
 
  <div className="mt-4 flex justify-center">
@@ -450,6 +543,25 @@ const [messages, setMessages] = useState<Message[]>([]);
                >
                  <span className="material-icons">{isRecording ? "stop" : "mic"}</span>
                </button>
+
+               {!isCrossExActive ? (
+  <button
+    onClick={handleStartCrossEx}
+    className="bg-purple-600 text-white px-4 py-2 rounded ml-2"
+  >
+    🎙 Start Cross-Ex
+  </button>
+) : (
+  <button
+    onClick={handleStopCrossEx}
+    className="bg-red-600 text-white px-4 py-2 rounded ml-2"
+  >
+    ⏹ Stop Cross-Ex
+  </button>
+
+  
+)}
+
              </div>
              <p className="text-xs text-gray-500 text-center mt-3">DebateBot can make mistakes. Consider checking important information.</p>
            </div>
@@ -464,9 +576,51 @@ const [messages, setMessages] = useState<Message[]>([]);
            <input type="file" onChange={handleBillFileChange} />
            <button onClick={handleBillSubmit} className="bg-green-600 rounded px-4 py-1 mt-2">Submit Choice</button>
            <button onClick={handleVectorize} className="bg-purple-600 rounded px-4 py-1 mt-4">Process</button>
+           {showInstructionModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="bg-white text-black rounded-lg p-6 w-96 shadow-lg">
+      <h2 className="text-xl font-semibold mb-4">Instructions</h2>
+      <div className="whitespace-pre-line border border-gray-300 rounded p-3 bg-gray-100 text-sm">
+        {customInstruction}
+      </div>
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={() => setShowInstructionModal(false)}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          Close
+        </button>
+      </div>
+      <div id="textbox-target" className="mt-4" />
+
+    </div>
+  </div>
+)}
+
          </div>
        )}
      </main>
+
+     {showInitialInstructions && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div className="bg-white text-black p-6 rounded-lg shadow-lg w-96">
+      <h2 className="text-lg font-semibold mb-3">Welcome to DebateBot</h2>
+      <p className="text-sm whitespace-pre-line">
+        This is a live debate tool. Choose your side, submit the reference bill. After this, speak your argument for 3 minutes max after clicking the microphone. 
+        The bot will respond for a max time of 3 min. After this start cross examination for 1 minute in real time
+      </p>
+      <div className="text-right mt-4">
+        <button
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded"
+          onClick={() => setShowInitialInstructions(false)}
+        >
+          Got it
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
    </div>
  );
 };

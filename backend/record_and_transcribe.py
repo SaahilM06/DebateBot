@@ -67,6 +67,9 @@ async def run_audio_transcription():
 
     print("🎤 Model loaded and listening...")
 
+    # Save previously written lines
+    written_lines = set()
+
     while True:
         try:
             now = datetime.utcnow()
@@ -101,15 +104,22 @@ async def run_audio_transcription():
                     await run_audio_transcription_queue.put(line)
                     print('📤 Sent to WebSocket')
 
-                    # ✅ Save to transcript file
+                # ✅ Save only new lines when phrase is complete
+                current_line = transcription[-1].strip()
+
+                if current_line and current_line not in written_lines:
+    
                     with open("output_transcribe.txt", "a") as f:
-                        f.write(line + "\n")
-                        
+                        f.write(current_line + "\n")
+                    written_lines.add(current_line)
+
+
                 sleep(0.25)
                 await asyncio.sleep(1)
 
         except KeyboardInterrupt:
             break
+
 
     print("\n\nFinal Transcript:")
     for line in transcription:
