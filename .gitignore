@@ -1,3 +1,11 @@
-echo "backend/coqui-venv/" >> .gitignore
-/backend/coqui-venv/
-echo "/Users/saahi/Desktop/debate-bot/backend/coqui-venv" >> .gitignore
+# Ignore the virtual environment
+backend/coqui-venv/
+
+# Optional: ignore local Mac-specific paths
+.DS_Store
+
+# Optional: ignore logs or temp files
+*.log
+*.tmp
+*.pyc
+__pycache__/
