@@ -1,2 +1,3 @@
 echo "backend/coqui-venv/" >> .gitignore
 /backend/coqui-venv/
+echo "/Users/saahi/Desktop/debate-bot/backend/coqui-venv" >> .gitignore
