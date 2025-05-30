@@ -18,4 +18,4 @@ def transcribe_audio_chunk(audio_bytes: bytes) -> str:
         return result.get("text", "").strip()
     except Exception as e:
         print("❌ Transcription error:", e)
-        return ""
+        return " "
